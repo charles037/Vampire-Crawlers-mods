@@ -185,6 +185,15 @@ public class ComboClickBehaviour : MonoBehaviour
 
     private static bool HasDestroyEffect(CardConfig cfg)
     {
+        var ptr = cfg.Pointer;
+        if (_consumableCache.TryGetValue(ptr, out var cached)) return cached;
+        var result = CheckDestroyEffect(cfg);
+        _consumableCache[ptr] = result;
+        return result;
+    }
+
+    private static bool CheckDestroyEffect(CardConfig cfg)
+    {
         try
         {
             var f = cfg.GetIl2CppType().GetField("onPlayEffect", Il2CppSystem.Reflection.BindingFlags.Public | Il2CppSystem.Reflection.BindingFlags.NonPublic | Il2CppSystem.Reflection.BindingFlags.Instance);
@@ -218,6 +227,7 @@ public class ComboClickBehaviour : MonoBehaviour
         return false;
     }
 
+    private static Dictionary<System.IntPtr, bool> _consumableCache = new();
     private static Il2CppSystem.Reflection.PropertyInfo _activeSelfProp;
     private static Il2CppSystem.Reflection.MethodInfo _getEnumM, _moveNextM;
     private static Il2CppSystem.Reflection.PropertyInfo _currentP;
