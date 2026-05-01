@@ -165,6 +165,8 @@ public class ComboClickBehaviour : MonoBehaviour
         }
     }
 
+    private int _cooldown;
+
     private void Update()
     {
         if (!_indicatorReady) TryCreateIndicator();
@@ -183,54 +185,21 @@ public class ComboClickBehaviour : MonoBehaviour
             _lastBackquoteState = bqDown;
         }
 
+        if (_cooldown > 0) { _cooldown--; return; }
+
         if (Mouse.current == null) return;
         var rightDown = Mouse.current.rightButton.isPressed;
         if (rightDown && !_lastRightState)
         {
             if (_autoMode)
-                TryPlayLowestCostCard();
+                TryPlayCard(allowFallback: true);
             else
-                TryPlayComboCard();
+                TryPlayCard(allowFallback: false);
         }
         _lastRightState = rightDown;
     }
 
-    private void TryPlayLowestCostCard()
-    {
-        try
-        {
-            var handPile = GameObject.Find("HandPile");
-            if (handPile == null) return;
-
-            var playerModel = FindObjectOfType<PlayerModel>();
-            if (playerModel == null) return;
-
-            var cards = handPile.GetComponentsInChildren<CardModel>(true);
-
-            CardModel bestCard = null;
-            int bestCost = int.MaxValue;
-
-            foreach (var card in cards)
-            {
-                if (card == null) continue;
-                var config = card.CardConfig;
-                if (config == null) continue;
-
-                var cost = config.manaCost;
-                if (cost < bestCost)
-                {
-                    bestCost = cost;
-                    bestCard = card;
-                }
-            }
-
-            if (bestCard != null)
-                playerModel.TryPlayCard(bestCard, true);
-        }
-        catch { }
-    }
-
-    private void TryPlayComboCard()
+    private void TryPlayCard(bool allowFallback)
     {
         try
         {
@@ -246,15 +215,25 @@ public class ComboClickBehaviour : MonoBehaviour
             int bestNormalCost = int.MaxValue;
             CardModel bestWild = null;
             int bestWildCost = int.MaxValue;
+            CardModel bestFallback = null;
+            int bestFallbackCost = int.MaxValue;
 
             foreach (var card in cards)
             {
                 if (card == null) continue;
                 var config = card.CardConfig;
                 if (config == null) continue;
-                if (!IsComboHighlighted(card)) continue;
 
                 var cost = config.manaCost;
+
+                if (allowFallback && cost < bestFallbackCost)
+                {
+                    bestFallbackCost = cost;
+                    bestFallback = card;
+                }
+
+                if (!IsComboHighlighted(card)) continue;
+
                 if (IsWildCard(card))
                 {
                     if (cost < bestWildCost)
@@ -274,8 +253,12 @@ public class ComboClickBehaviour : MonoBehaviour
             }
 
             var bestCard = bestNormal ?? bestWild;
+            if (bestCard == null && allowFallback)
+                bestCard = bestFallback;
+
             if (bestCard != null)
                 playerModel.TryPlayCard(bestCard, true);
+            _cooldown = 10;
         }
         catch { }
     }
