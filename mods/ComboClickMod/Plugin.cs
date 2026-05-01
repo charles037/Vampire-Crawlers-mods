@@ -49,7 +49,7 @@ public class ComboClickPlugin : BasePlugin
                 {
                     if (card == null) continue;
                     var name = ReadCardName(card);
-                    if (string.IsNullOrEmpty(name) || SpriteCache.ContainsKey(name)) continue;
+                    if (string.IsNullOrEmpty(name) || name == "?" || SpriteCache.ContainsKey(name)) continue;
 
                     unsafe
                     {
@@ -57,9 +57,7 @@ public class ComboClickPlugin : BasePlugin
                         if (group == null) continue;
                         long ptr = *(long*)(group.Pointer.ToInt64() + 0x68);
                         if (ptr != 0)
-                        {
                             SpriteCache[name] = new Sprite((System.IntPtr)ptr);
-                        }
                     }
                 }
                 Log.LogInfo($"[ComboClickMod] Loaded {SpriteCache.Count} card sprites");
@@ -67,6 +65,20 @@ public class ComboClickPlugin : BasePlugin
             }
         }
         catch (System.Exception ex) { Log.LogError($"[ComboClickMod] Sprite extraction error: {ex}"); }
+    }
+
+    static string ReadCardName(Il2CppSystem.Object obj)
+    {
+        if (obj == null) return "?";
+        try
+        {
+            var cfg = new CardConfig(obj.Pointer);
+            var name = cfg.Name;
+            if (!string.IsNullOrEmpty(name) && !name.StartsWith("No translation"))
+                return name;
+        }
+        catch { }
+        return "?";
     }
 
     static Il2CppSystem.Object GetProp(Il2CppSystem.Object obj, string name)
@@ -77,14 +89,6 @@ public class ComboClickPlugin : BasePlugin
             Il2CppSystem.Reflection.BindingFlags.Public |
             Il2CppSystem.Reflection.BindingFlags.NonPublic |
             Il2CppSystem.Reflection.BindingFlags.Instance)?.GetValue(obj);
-
-    static string ReadCardName(Il2CppSystem.Object obj)
-    {
-        if (obj == null) return null;
-        var v = GetProp(obj, "Name");
-        if (v == null) return null;
-        return Il2CppInterop.Runtime.IL2CPP.Il2CppStringToManaged(v.Pointer);
-    }
 
     static List<Il2CppSystem.Object> ReadIl2CppList(Il2CppSystem.Object listObj)
     {
