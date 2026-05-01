@@ -25,7 +25,6 @@ public class ComboClickPlugin : BasePlugin
         Object.DontDestroyOnLoad(go);
         Log.LogInfo("ComboClickMod loaded.");
     }
-
     public override bool Unload() => true;
 
     internal bool _spritesExtracted;
@@ -47,51 +46,41 @@ public class ComboClickPlugin : BasePlugin
                 foreach (var card in cards)
                 {
                     if (card == null) continue;
-                    var name = ReadCardName(card);
-                    if (string.IsNullOrEmpty(name) || name == "?" || SpriteCache.ContainsKey(name)) continue;
+                    var n = ReadCardName(card);
+                    if (string.IsNullOrEmpty(n) || n == "?" || SpriteCache.ContainsKey(n)) continue;
                     unsafe
                     {
-                        var group = GetIl2CppField(card, "cardGroup");
-                        if (group == null) continue;
-                        long ptr = *(long*)(group.Pointer.ToInt64() + 0x68);
-                        if (ptr != 0)
-                            SpriteCache[name] = new Sprite((System.IntPtr)ptr);
+                        var g = GetIl2CppField(card, "cardGroup");
+                        if (g == null) continue;
+                        long p = *(long*)(g.Pointer.ToInt64() + 0x68);
+                        if (p != 0) SpriteCache[n] = new Sprite((System.IntPtr)p);
                     }
                 }
-                Log.LogInfo($"[ComboClickMod] Loaded {SpriteCache.Count} card sprites");
+                Log.LogInfo($"[ComboClickMod] Loaded {SpriteCache.Count} sprites");
                 break;
             }
         }
-        catch (System.Exception ex) { Log.LogError($"[ComboClickMod] Sprite error: {ex}"); }
+        catch (System.Exception ex) { Log.LogError($"[ComboClickMod] Sprite: {ex}"); }
     }
 
     static string ReadCardName(Il2CppSystem.Object obj)
     {
         if (obj == null) return "?";
-        try { var cfg = new CardConfig(obj.Pointer); var n = cfg.Name; if (!string.IsNullOrEmpty(n) && !n.StartsWith("No translation")) return n; } catch { }
+        try { var c = new CardConfig(obj.Pointer); var n = c.Name; if (!string.IsNullOrEmpty(n) && !n.StartsWith("No translation")) return n; } catch { }
         return "?";
     }
-
-    static Il2CppSystem.Object GetProp(Il2CppSystem.Object obj, string name)
-        => obj.GetIl2CppType().GetProperty(name)?.GetValue(obj);
-
-    static Il2CppSystem.Object GetIl2CppField(Il2CppSystem.Object obj, string name)
-        => obj.GetIl2CppType().GetField(name,
-            Il2CppSystem.Reflection.BindingFlags.Public |
-            Il2CppSystem.Reflection.BindingFlags.NonPublic |
-            Il2CppSystem.Reflection.BindingFlags.Instance)?.GetValue(obj);
-
-    static List<Il2CppSystem.Object> ReadIl2CppList(Il2CppSystem.Object listObj)
+    static Il2CppSystem.Object GetProp(Il2CppSystem.Object o, string n) => o.GetIl2CppType().GetProperty(n)?.GetValue(o);
+    static Il2CppSystem.Object GetIl2CppField(Il2CppSystem.Object o, string n) => o.GetIl2CppType().GetField(n, Il2CppSystem.Reflection.BindingFlags.Public | Il2CppSystem.Reflection.BindingFlags.NonPublic | Il2CppSystem.Reflection.BindingFlags.Instance)?.GetValue(o);
+    static List<Il2CppSystem.Object> ReadIl2CppList(Il2CppSystem.Object lo)
     {
         var r = new List<Il2CppSystem.Object>();
-        if (listObj == null) return r;
-        var en = listObj.GetIl2CppType().GetMethod("GetEnumerator").Invoke(listObj, null);
+        if (lo == null) return r;
+        var en = lo.GetIl2CppType().GetMethod("GetEnumerator").Invoke(lo, null);
         var et = en.GetIl2CppType();
         while (Unbox<bool>(et.GetMethod("MoveNext").Invoke(en, null)))
             r.Add(et.GetProperty("Current").GetValue(en));
         return r;
     }
-
     public static unsafe T Unbox<T>(Il2CppSystem.Object v) where T : unmanaged => v.Unbox<T>();
 }
 
@@ -99,14 +88,10 @@ public class ComboClickBehaviour : MonoBehaviour
 {
     public ComboClickBehaviour(System.IntPtr ptr) : base(ptr) { }
 
-    private bool _lastRightState;
-    private bool _lastBackquoteState;
-    private bool _autoMode;
-    private bool _indicatorReady;
+    private bool _lastRightState, _lastBqState, _autoMode, _indicatorReady;
     private GameObject _indicatorCanvas;
     private Image _indicatorImage;
-    private Sprite _comboSprite;
-    private Sprite _autoSprite;
+    private Sprite _comboSprite, _autoSprite;
     private int _cooldown;
 
     private void TryCreateIndicator()
@@ -117,61 +102,48 @@ public class ComboClickBehaviour : MonoBehaviour
             ComboClickPlugin.Instance.EnsureSprites();
             ComboClickPlugin.SpriteCache.TryGetValue("飞刀", out _comboSprite);
             ComboClickPlugin.SpriteCache.TryGetValue("千刃", out _autoSprite);
-
             _indicatorCanvas = new GameObject("ComboIndicatorCanvas");
-            var canvas = _indicatorCanvas.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 1000;
+            var cv = _indicatorCanvas.AddComponent<Canvas>();
+            cv.renderMode = RenderMode.ScreenSpaceOverlay; cv.sortingOrder = 1000;
             Object.DontDestroyOnLoad(_indicatorCanvas);
-
-            var imgGo = new GameObject("ComboIndicatorImg");
-            imgGo.transform.SetParent(_indicatorCanvas.transform, false);
-            _indicatorImage = imgGo.AddComponent<Image>();
+            var ig = new GameObject("ComboIndicatorImg");
+            ig.transform.SetParent(_indicatorCanvas.transform, false);
+            _indicatorImage = ig.AddComponent<Image>();
             _indicatorImage.preserveAspect = true;
-            var rt = imgGo.GetComponent<RectTransform>();
-            rt.anchorMin = new Vector2(0, 0);
-            rt.anchorMax = new Vector2(0, 0);
-            rt.pivot = new Vector2(0, 0);
+            var rt = ig.GetComponent<RectTransform>();
+            rt.anchorMin = rt.anchorMax = rt.pivot = Vector2.zero;
             rt.anchoredPosition = new Vector2(20, 20);
             rt.sizeDelta = new Vector2(48, 48);
             UpdateIndicator();
         }
-        catch (System.Exception ex) { ComboClickPlugin.Instance.Log.LogError($"[ComboClickMod] Indicator: {ex}"); }
+        catch (System.Exception ex) { ComboClickPlugin.Instance.Log.LogError($"[ComboClickMod] UI: {ex}"); }
     }
 
     private void UpdateIndicator()
     {
         if (_indicatorImage == null) return;
-        var sprite = _autoMode ? _autoSprite : _comboSprite;
-        _indicatorImage.sprite = sprite;
-        _indicatorImage.enabled = sprite != null;
+        var s = _autoMode ? _autoSprite : _comboSprite;
+        _indicatorImage.sprite = s;
+        _indicatorImage.enabled = s != null;
     }
 
     private void Update()
     {
         if (!_indicatorReady) TryCreateIndicator();
-
         if (Keyboard.current != null)
         {
-            var bqDown = Keyboard.current.backquoteKey.isPressed;
-            if (bqDown && !_lastBackquoteState)
-            {
-                _autoMode = !_autoMode;
-                UpdateIndicator();
-                ComboClickPlugin.Instance.Log.LogInfo($"[ComboClickMod] Mode={(_autoMode ? "千刃" : "飞刀")}");
-            }
-            _lastBackquoteState = bqDown;
+            var bq = Keyboard.current.backquoteKey.isPressed;
+            if (bq && !_lastBqState) { _autoMode = !_autoMode; UpdateIndicator(); ComboClickPlugin.Instance.Log.LogInfo($"[ComboClickMod] Mode={(_autoMode?"千刃":"飞刀")}"); }
+            _lastBqState = bq;
         }
-
         if (_cooldown > 0) _cooldown--;
-
         if (Mouse.current == null) return;
-        var rightDown = Mouse.current.rightButton.isPressed;
-        if (rightDown && !_lastRightState && _cooldown <= 0)
+        var rd = Mouse.current.rightButton.isPressed;
+        if (rd && !_lastRightState && _cooldown <= 0)
         {
-            TryPlayCard(_autoMode);
+            if (_autoMode) TryPlayCard(true); else TryPlayCard(false);
         }
-        _lastRightState = rightDown;
+        _lastRightState = rd;
     }
 
     private void TryPlayCard(bool allowFallback)
@@ -179,111 +151,91 @@ public class ComboClickBehaviour : MonoBehaviour
         var log = ComboClickPlugin.Instance.Log;
         try
         {
-            var handPile = GameObject.Find("HandPile");
-            if (handPile == null) return;
-
-            var playerModel = FindObjectOfType<PlayerModel>();
-            if (playerModel == null) return;
-
-            var cards = handPile.GetComponentsInChildren<CardModel>(false);
+            var hp = GameObject.Find("HandPile"); if (hp == null) return;
+            var pm = FindObjectOfType<PlayerModel>(); if (pm == null) return;
+            var cards = hp.GetComponentsInChildren<CardModel>(true);
             log.LogInfo($"[ComboClickMod] Mode={(_autoMode?"千刃":"飞刀")} hand={cards.Length}");
-
-            CardModel bestNormal = null, bestWild = null, bestFallback = null;
-            int bnCost = int.MaxValue, bwCost = int.MaxValue, fbCost = int.MaxValue;
-
+            CardModel bn = null, bw = null, fb = null;
+            int bnc = int.MaxValue, bwc = int.MaxValue, fbc = int.MaxValue;
             foreach (var card in cards)
             {
                 if (card == null) continue;
-                var config = card.CardConfig;
-                if (config == null) continue;
+                var cfg = card.CardConfig; if (cfg == null) continue;
+                if (!card.gameObject.activeInHierarchy) continue;
                 if (card.IsCopyWithDestroy) continue;
+                var cost = cfg.manaCost;
+                var hi = IsComboHighlighted(card);
+                var wi = IsWildCard(card);
 
-                var cost = config.manaCost;
-                var h = IsComboHighlighted(card);
-                var w = IsWildCard(card);
-
-                log.LogInfo($"[ComboClickMod]   {config.Name} c={cost} combo={h} wild={w}");
-
-                if (allowFallback && cost < fbCost) { fbCost = cost; bestFallback = card; }
-                if (!h) continue;
-
-                if (w) { if (cost < bwCost) { bwCost = cost; bestWild = card; } }
-                else { if (cost < bnCost) { bnCost = cost; bestNormal = card; } }
+                bool consumable = HasDestroyEffect(cfg);
+                if (consumable) continue;
+                if (allowFallback && cost < fbc) { fbc = cost; fb = card; }
+                if (!hi) continue;
+                if (wi) { if (cost < bwc) { bwc = cost; bw = card; } }
+                else { if (cost < bnc) { bnc = cost; bn = card; } }
             }
-
-            var best = bestNormal ?? bestWild;
-            if (best == null && allowFallback) best = bestFallback;
-
-            if (best != null)
-            {
-                log.LogInfo($"[ComboClickMod] PLAY: {best.CardConfig.Name}");
-                playerModel.TryPlayCard(best, true);
-            }
-            else
-            {
-                log.LogInfo("[ComboClickMod] NO PLAY");
-            }
+            var best = bn ?? bw;
+            if (best == null && allowFallback) best = fb;
+            if (best != null) { log.LogInfo($"[ComboClickMod] PLAY: {best.CardConfig.Name}"); pm.TryPlayCard(best, true); }
+            else log.LogInfo("[ComboClickMod] NO PLAY");
             _cooldown = 10;
         }
         catch (System.Exception ex) { log.LogError($"[ComboClickMod] Error: {ex}"); }
     }
 
-    private static bool IsWildCard(CardModel card)
+    private static bool HasDestroyEffect(CardConfig cfg)
     {
         try
         {
-            var ct = card.CardCostType;
-            return ct != null && ct.GetIl2CppType().FullName.Contains("WildCostType");
+            var f = cfg.GetIl2CppType().GetField("onPlayEffect", Il2CppSystem.Reflection.BindingFlags.Public | Il2CppSystem.Reflection.BindingFlags.NonPublic | Il2CppSystem.Reflection.BindingFlags.Instance);
+            if (f == null) return false;
+            var arr = f.GetValue(cfg); if (arr == null) return false;
+            var en = arr.GetIl2CppType().GetMethod("GetEnumerator").Invoke(arr, null);
+            if (en == null) return false;
+            var et = en.GetIl2CppType();
+            var mn = et.GetMethod("MoveNext");
+            var cp = et.GetProperty("Current");
+            while (ComboClickPlugin.Unbox<bool>(mn.Invoke(en, null)))
+            {
+                var item = cp.GetValue(en);
+                if (item == null) continue;
+                if (item.GetIl2CppType().Name.Contains("Destroy")) return true;
+            }
         }
         catch { }
         return false;
     }
 
-    private static bool IsComboHighlighted(CardModel card)
+    private static bool IsWildCard(CardModel c)
     {
-        try
-        {
-            var cv = card.CardView;
-            return cv != null && ListHasActive(cv, "_comboElements");
-        }
-        catch { }
+        try { var ct = c.CardCostType; return ct != null && ct.GetIl2CppType().FullName.Contains("WildCostType"); } catch { }
+        return false;
+    }
+
+    private static bool IsComboHighlighted(CardModel c)
+    {
+        try { var cv = c.CardView; return cv != null && ListHasActive(cv, "_comboElements"); } catch { }
         return false;
     }
 
     private static Il2CppSystem.Reflection.PropertyInfo _activeSelfProp;
-    private static Il2CppSystem.Reflection.MethodInfo _getEnumeratorMethod;
-    private static Il2CppSystem.Reflection.MethodInfo _moveNextMethod;
-    private static Il2CppSystem.Reflection.PropertyInfo _currentProp;
+    private static Il2CppSystem.Reflection.MethodInfo _getEnumM, _moveNextM;
+    private static Il2CppSystem.Reflection.PropertyInfo _currentP;
 
-    private static bool ListHasActive(MonoBehaviour cv, string fieldName)
+    private static bool ListHasActive(MonoBehaviour cv, string fn)
     {
-        var field = cv.GetIl2CppType().GetField(fieldName,
-            Il2CppSystem.Reflection.BindingFlags.Public |
-            Il2CppSystem.Reflection.BindingFlags.NonPublic |
-            Il2CppSystem.Reflection.BindingFlags.Instance);
-        if (field == null) return false;
-        var list = field.GetValue(cv);
-        if (list == null) return false;
-
-        if (_activeSelfProp == null)
-        {
-            var gt = Il2CppSystem.Type.GetType("UnityEngine.GameObject, UnityEngine.CoreModule", false);
-            _activeSelfProp = gt?.GetProperty("activeSelf");
-            if (_activeSelfProp == null) return false;
-        }
-        if (_getEnumeratorMethod == null)
-            _getEnumeratorMethod = list.GetIl2CppType().GetMethod("GetEnumerator");
-
-        var en = _getEnumeratorMethod.Invoke(list, null);
-        if (en == null) return false;
+        var f = cv.GetIl2CppType().GetField(fn, Il2CppSystem.Reflection.BindingFlags.Public | Il2CppSystem.Reflection.BindingFlags.NonPublic | Il2CppSystem.Reflection.BindingFlags.Instance);
+        if (f == null) return false;
+        var list = f.GetValue(cv); if (list == null) return false;
+        if (_activeSelfProp == null) { var gt = Il2CppSystem.Type.GetType("UnityEngine.GameObject, UnityEngine.CoreModule", false); _activeSelfProp = gt?.GetProperty("activeSelf"); if (_activeSelfProp == null) return false; }
+        if (_getEnumM == null) _getEnumM = list.GetIl2CppType().GetMethod("GetEnumerator");
+        var en = _getEnumM.Invoke(list, null); if (en == null) return false;
         var et = en.GetIl2CppType();
-        if (_moveNextMethod == null) _moveNextMethod = et.GetMethod("MoveNext");
-        if (_currentProp == null) _currentProp = et.GetProperty("Current");
-
-        while (ComboClickPlugin.Unbox<bool>(_moveNextMethod.Invoke(en, null)))
+        if (_moveNextM == null) _moveNextM = et.GetMethod("MoveNext");
+        if (_currentP == null) _currentP = et.GetProperty("Current");
+        while (ComboClickPlugin.Unbox<bool>(_moveNextM.Invoke(en, null)))
         {
-            var go = _currentProp.GetValue(en);
-            if (go == null) continue;
+            var go = _currentP.GetValue(en); if (go == null) continue;
             var av = _activeSelfProp.GetValue(go);
             if (av != null && ComboClickPlugin.Unbox<bool>(av)) return true;
         }
