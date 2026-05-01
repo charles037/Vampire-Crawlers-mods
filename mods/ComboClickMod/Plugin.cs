@@ -44,13 +44,11 @@ public class ComboClickPlugin : BasePlugin
             {
                 if (so.name != "CardDatabase") continue;
                 var cards = ReadIl2CppList(GetProp(so, "Assets"));
-
                 foreach (var card in cards)
                 {
                     if (card == null) continue;
                     var name = ReadCardName(card);
                     if (string.IsNullOrEmpty(name) || name == "?" || SpriteCache.ContainsKey(name)) continue;
-
                     unsafe
                     {
                         var group = GetIl2CppField(card, "cardGroup");
@@ -64,20 +62,13 @@ public class ComboClickPlugin : BasePlugin
                 break;
             }
         }
-        catch (System.Exception ex) { Log.LogError($"[ComboClickMod] Sprite extraction error: {ex}"); }
+        catch (System.Exception ex) { Log.LogError($"[ComboClickMod] Sprite error: {ex}"); }
     }
 
     static string ReadCardName(Il2CppSystem.Object obj)
     {
         if (obj == null) return "?";
-        try
-        {
-            var cfg = new CardConfig(obj.Pointer);
-            var name = cfg.Name;
-            if (!string.IsNullOrEmpty(name) && !name.StartsWith("No translation"))
-                return name;
-        }
-        catch { }
+        try { var cfg = new CardConfig(obj.Pointer); var n = cfg.Name; if (!string.IsNullOrEmpty(n) && !n.StartsWith("No translation")) return n; } catch { }
         return "?";
     }
 
@@ -96,10 +87,8 @@ public class ComboClickPlugin : BasePlugin
         if (listObj == null) return r;
         var en = listObj.GetIl2CppType().GetMethod("GetEnumerator").Invoke(listObj, null);
         var et = en.GetIl2CppType();
-        var moveNext = et.GetMethod("MoveNext");
-        var current = et.GetProperty("Current");
-        while (Unbox<bool>(moveNext.Invoke(en, null)))
-            r.Add(current.GetValue(en));
+        while (Unbox<bool>(et.GetMethod("MoveNext").Invoke(en, null)))
+            r.Add(et.GetProperty("Current").GetValue(en));
         return r;
     }
 
@@ -118,6 +107,7 @@ public class ComboClickBehaviour : MonoBehaviour
     private Image _indicatorImage;
     private Sprite _comboSprite;
     private Sprite _autoSprite;
+    private int _cooldown;
 
     private void TryCreateIndicator()
     {
@@ -138,38 +128,24 @@ public class ComboClickBehaviour : MonoBehaviour
             imgGo.transform.SetParent(_indicatorCanvas.transform, false);
             _indicatorImage = imgGo.AddComponent<Image>();
             _indicatorImage.preserveAspect = true;
-
             var rt = imgGo.GetComponent<RectTransform>();
             rt.anchorMin = new Vector2(0, 0);
             rt.anchorMax = new Vector2(0, 0);
             rt.pivot = new Vector2(0, 0);
             rt.anchoredPosition = new Vector2(20, 20);
             rt.sizeDelta = new Vector2(48, 48);
-
             UpdateIndicator();
         }
-        catch (System.Exception ex)
-        {
-            ComboClickPlugin.Instance.Log.LogError($"[ComboClickMod] Indicator error: {ex}");
-        }
+        catch (System.Exception ex) { ComboClickPlugin.Instance.Log.LogError($"[ComboClickMod] Indicator: {ex}"); }
     }
 
     private void UpdateIndicator()
     {
         if (_indicatorImage == null) return;
         var sprite = _autoMode ? _autoSprite : _comboSprite;
-        if (sprite != null)
-        {
-            _indicatorImage.sprite = sprite;
-            _indicatorImage.enabled = true;
-        }
-        else
-        {
-            _indicatorImage.enabled = false;
-        }
+        _indicatorImage.sprite = sprite;
+        _indicatorImage.enabled = sprite != null;
     }
-
-    private int _cooldown;
 
     private void Update()
     {
@@ -182,29 +158,25 @@ public class ComboClickBehaviour : MonoBehaviour
             {
                 _autoMode = !_autoMode;
                 UpdateIndicator();
-                ComboClickPlugin.Instance.Log.LogInfo(_autoMode
-                    ? "[ComboClickMod] Auto mode ON"
-                    : "[ComboClickMod] Combo mode ON");
+                ComboClickPlugin.Instance.Log.LogInfo($"[ComboClickMod] Mode={(_autoMode ? "千刃" : "飞刀")}");
             }
             _lastBackquoteState = bqDown;
         }
 
-        if (_cooldown > 0) { _cooldown--; return; }
+        if (_cooldown > 0) _cooldown--;
 
         if (Mouse.current == null) return;
         var rightDown = Mouse.current.rightButton.isPressed;
-        if (rightDown && !_lastRightState)
+        if (rightDown && !_lastRightState && _cooldown <= 0)
         {
-            if (_autoMode)
-                TryPlayCard(allowFallback: true);
-            else
-                TryPlayCard(allowFallback: false);
+            TryPlayCard(_autoMode);
         }
         _lastRightState = rightDown;
     }
 
     private void TryPlayCard(bool allowFallback)
     {
+        var log = ComboClickPlugin.Instance.Log;
         try
         {
             var handPile = GameObject.Find("HandPile");
@@ -213,67 +185,55 @@ public class ComboClickBehaviour : MonoBehaviour
             var playerModel = FindObjectOfType<PlayerModel>();
             if (playerModel == null) return;
 
-            var cards = handPile.GetComponentsInChildren<CardModel>(true);
+            var cards = handPile.GetComponentsInChildren<CardModel>(false);
+            log.LogInfo($"[ComboClickMod] Mode={(_autoMode?"千刃":"飞刀")} hand={cards.Length}");
 
-            CardModel bestNormal = null;
-            int bestNormalCost = int.MaxValue;
-            CardModel bestWild = null;
-            int bestWildCost = int.MaxValue;
-            CardModel bestFallback = null;
-            int bestFallbackCost = int.MaxValue;
+            CardModel bestNormal = null, bestWild = null, bestFallback = null;
+            int bnCost = int.MaxValue, bwCost = int.MaxValue, fbCost = int.MaxValue;
 
             foreach (var card in cards)
             {
                 if (card == null) continue;
                 var config = card.CardConfig;
                 if (config == null) continue;
+                if (card.IsCopyWithDestroy) continue;
 
                 var cost = config.manaCost;
+                var h = IsComboHighlighted(card);
+                var w = IsWildCard(card);
 
-                if (allowFallback && cost < bestFallbackCost)
-                {
-                    bestFallbackCost = cost;
-                    bestFallback = card;
-                }
+                log.LogInfo($"[ComboClickMod]   {config.Name} c={cost} combo={h} wild={w}");
 
-                if (!IsComboHighlighted(card)) continue;
+                if (allowFallback && cost < fbCost) { fbCost = cost; bestFallback = card; }
+                if (!h) continue;
 
-                if (IsWildCard(card))
-                {
-                    if (cost < bestWildCost)
-                    {
-                        bestWildCost = cost;
-                        bestWild = card;
-                    }
-                }
-                else
-                {
-                    if (cost < bestNormalCost)
-                    {
-                        bestNormalCost = cost;
-                        bestNormal = card;
-                    }
-                }
+                if (w) { if (cost < bwCost) { bwCost = cost; bestWild = card; } }
+                else { if (cost < bnCost) { bnCost = cost; bestNormal = card; } }
             }
 
-            var bestCard = bestNormal ?? bestWild;
-            if (bestCard == null && allowFallback)
-                bestCard = bestFallback;
+            var best = bestNormal ?? bestWild;
+            if (best == null && allowFallback) best = bestFallback;
 
-            if (bestCard != null)
-                playerModel.TryPlayCard(bestCard, true);
+            if (best != null)
+            {
+                log.LogInfo($"[ComboClickMod] PLAY: {best.CardConfig.Name}");
+                playerModel.TryPlayCard(best, true);
+            }
+            else
+            {
+                log.LogInfo("[ComboClickMod] NO PLAY");
+            }
             _cooldown = 10;
         }
-        catch { }
+        catch (System.Exception ex) { log.LogError($"[ComboClickMod] Error: {ex}"); }
     }
 
     private static bool IsWildCard(CardModel card)
     {
         try
         {
-            var costType = card.CardCostType;
-            if (costType == null) return false;
-            return costType.GetIl2CppType().FullName.Contains("WildCostType");
+            var ct = card.CardCostType;
+            return ct != null && ct.GetIl2CppType().FullName.Contains("WildCostType");
         }
         catch { }
         return false;
@@ -284,8 +244,7 @@ public class ComboClickBehaviour : MonoBehaviour
         try
         {
             var cv = card.CardView;
-            if (cv == null) return false;
-            return ListHasActive(cv, "_comboElements");
+            return cv != null && ListHasActive(cv, "_comboElements");
         }
         catch { }
         return false;
@@ -303,36 +262,30 @@ public class ComboClickBehaviour : MonoBehaviour
             Il2CppSystem.Reflection.BindingFlags.NonPublic |
             Il2CppSystem.Reflection.BindingFlags.Instance);
         if (field == null) return false;
-
         var list = field.GetValue(cv);
         if (list == null) return false;
 
         if (_activeSelfProp == null)
         {
-            var goType = Il2CppSystem.Type.GetType("UnityEngine.GameObject, UnityEngine.CoreModule", false);
-            _activeSelfProp = goType?.GetProperty("activeSelf");
+            var gt = Il2CppSystem.Type.GetType("UnityEngine.GameObject, UnityEngine.CoreModule", false);
+            _activeSelfProp = gt?.GetProperty("activeSelf");
             if (_activeSelfProp == null) return false;
         }
-
         if (_getEnumeratorMethod == null)
             _getEnumeratorMethod = list.GetIl2CppType().GetMethod("GetEnumerator");
 
         var en = _getEnumeratorMethod.Invoke(list, null);
         if (en == null) return false;
         var et = en.GetIl2CppType();
-
-        if (_moveNextMethod == null)
-            _moveNextMethod = et.GetMethod("MoveNext");
-        if (_currentProp == null)
-            _currentProp = et.GetProperty("Current");
+        if (_moveNextMethod == null) _moveNextMethod = et.GetMethod("MoveNext");
+        if (_currentProp == null) _currentProp = et.GetProperty("Current");
 
         while (ComboClickPlugin.Unbox<bool>(_moveNextMethod.Invoke(en, null)))
         {
             var go = _currentProp.GetValue(en);
             if (go == null) continue;
             var av = _activeSelfProp.GetValue(go);
-            if (av != null && ComboClickPlugin.Unbox<bool>(av))
-                return true;
+            if (av != null && ComboClickPlugin.Unbox<bool>(av)) return true;
         }
         return false;
     }
