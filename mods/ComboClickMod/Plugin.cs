@@ -169,6 +169,13 @@ public class ComboClickBehaviour : MonoBehaviour
 
                 bool consumable = HasDestroyEffect(cfg);
                 if (consumable) continue;
+
+                try
+                {
+                    var bc = card.BreakableCard;
+                    if (bc != null && (int)bc.CrackState >= 1) continue;
+                }
+                catch { }
                 if (allowFallback && cost < fbc) { fbc = cost; fb = card; }
                 if (!hi) continue;
                 if (wi) { if (cost < bwc) { bwc = cost; bw = card; } }
@@ -176,7 +183,7 @@ public class ComboClickBehaviour : MonoBehaviour
             }
             var best = bn ?? bw;
             if (best == null && allowFallback) best = fb;
-            if (best != null) { log.LogInfo($"[ComboClickMod] PLAY: {best.CardConfig.Name}"); pm.TryPlayCard(best, true); }
+            if (best != null) { log.LogInfo($"[ComboClickMod] PLAY: {best.CardConfig.Name}"); pm.TryPlayCard(best, false); }
             else log.LogInfo("[ComboClickMod] NO PLAY");
             _cooldown = 10;
         }
